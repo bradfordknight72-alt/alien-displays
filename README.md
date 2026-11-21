@@ -31,8 +31,8 @@ a clock, and messages sent from the family web app, from anywhere.
 
 ## Releasing firmware
 
-1. Bump `FW_VERSION` in `alien_v2.ino` (e.g. `2.2.0`) and commit.
-2. Tag and push: `git tag v2.2.0 && git push origin v2.2.0`
+1. Bump `FW_VERSION` in `alien_v2.ino` (e.g. `2.2.0`) and commit to `main`.
+2. In GitHub: **Actions → Firmware → Run workflow** (or publish a GitHub release tagged `v2.2.0`).
 3. GitHub builds it and uploads it as an **unpublished test release**.
 4. In the web app, **Publish** it. Displays set to *Test releases* install it within ~15 s.
 5. Once happy, set the release to everyone (or upload again with channel *stable*).

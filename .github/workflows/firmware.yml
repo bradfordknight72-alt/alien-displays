@@ -1,7 +1,7 @@
 # Builds the alien firmware and uploads it to Supabase as an unpublished TEST release.
-# Trigger: push a tag like v2.2.0 (must match FW_VERSION in alien_v2.ino),
-# or run it by hand from the Actions tab (build only, no upload).
-# Publish it afterwards from the web app's Firmware releases section.
+# Trigger: Actions tab > Firmware > Run workflow (builds whatever FW_VERSION says in
+# alien_v2.ino on main), or publish a GitHub release/tag like v2.2.0 that matches it.
+# Either way it lands as an UNPUBLISHED test release; publish it from the web app.
 #
 # Repo secrets needed (Settings > Secrets and variables > Actions):
 #   SUPABASE_URL          https://vvnrjlsqtfieftvjenhf.supabase.co
@@ -14,6 +14,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to Supabase as a test release'
+        type: boolean
+        default: true
 
 jobs:
   build:
@@ -60,7 +65,7 @@ jobs:
           path: build/alien_v2.ino.bin
 
       - name: Upload to Supabase as a test release (unpublished)
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || inputs.upload
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
