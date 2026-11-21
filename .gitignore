@@ -1,0 +1,4 @@
+firmware/**/secrets.h
+firmware/**/build/
+*.bin
+.DS_Store

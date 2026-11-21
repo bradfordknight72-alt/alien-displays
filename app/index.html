@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>Aliens</title>
+<style>
+  :root { --bg:#111; --card:#1b1b1b; --line:#333; --text:#eee; --muted:#8a8a8a; --red:#e03a3a; --green:#4cc46a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; }
+  main { max-width:520px; margin:auto; padding:16px 16px 60px; }
+  h1 { font-size:24px; margin:8px 0 18px; display:flex; align-items:center; gap:10px; }
+  h1 .who { margin-left:auto; font-size:13px; font-weight:400; color:var(--muted); }
+  h2 { font-size:18px; margin:0; }
+  h3 { font-size:14px; color:var(--muted); font-weight:500; margin:18px 0 6px; text-transform:uppercase; letter-spacing:.05em; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin:12px 0; }
+  input, textarea, select, button { width:100%; font:inherit; color:var(--text); background:#222; border:1px solid var(--line); border-radius:10px; padding:11px 12px; margin:5px 0; }
+  textarea { resize:vertical; }
+  button { background:var(--red); border:none; font-weight:600; cursor:pointer; }
+  button.ghost { background:#2a2a2a; border:1px solid var(--line); font-weight:500; }
+  button.link { background:none; border:none; color:var(--muted); padding:4px; width:auto; font-weight:400; text-decoration:underline; }
+  button:disabled { opacity:.5; }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  .head { display:flex; align-items:center; gap:8px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#555; flex:none; }
+  .dot.on { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .meta { color:var(--muted); font-size:13px; }
+  .msg { display:flex; justify-content:space-between; gap:8px; border-top:1px solid var(--line); padding:7px 0; font-size:14px; }
+  .msg .t { overflow-wrap:anywhere; }
+  .pill { font-size:12px; border-radius:20px; padding:2px 8px; background:#2c2c2c; color:var(--muted); white-space:nowrap; align-self:flex-start; }
+  .pill.ok { background:#173322; color:var(--green); }
+  .err { color:#ff8080; font-size:14px; min-height:1.2em; }
+  .ok-text { color:var(--green); font-size:14px; min-height:1.2em; }
+  details summary { cursor:pointer; color:var(--muted); font-size:14px; margin-top:8px; }
+  .hidden { display:none !important; }
+  label { font-size:13px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>&#128125; Aliens <span class="who" id="who"></span></h1>
+
+  <!-- Sign in -->
+  <section id="authView" class="card hidden">
+    <h2 id="authTitle">Sign in</h2>
+    <input id="email" type="email" placeholder="Email" autocomplete="email">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <input id="displayName" class="hidden" placeholder="Your name (shown on messages)">
+    <button id="authBtn">Sign in</button>
+    <div class="err" id="authErr"></div>
+    <button class="link" id="authSwitch">New here? Create an account</button>
+  </section>
+
+  <!-- Signed in -->
+  <section id="appView" class="hidden">
+    <div id="devices"></div>
+
+    <div class="card">
+      <h2>Add a display</h2>
+      <p class="meta">Type the code scrolling on a new display.</p>
+      <div class="row">
+        <input id="claimCode" placeholder="Code, e.g. 4364BQ" maxlength="6" style="text-transform:uppercase">
+        <input id="claimName" placeholder="Name, e.g. Kat's Alien">
+      </div>
+      <button id="claimBtn">Add display</button>
+      <div class="err" id="claimErr"></div>
+    </div>
+
+    <div class="card hidden" id="adminCard">
+      <h2>Firmware releases</h2>
+      <p class="meta">Export the compiled binary from the Arduino IDE (Partition Scheme: Minimal SPIFFS). The version here must match FW_VERSION in that build.</p>
+      <input id="fwFile" type="file" accept=".bin">
+      <div class="row">
+        <input id="fwVersion" placeholder="Version, e.g. 2.0.1">
+        <select id="fwChannel"><option value="test">Test displays</option><option value="stable">Everyone</option></select>
+      </div>
+      <input id="fwNotes" placeholder="Notes, e.g. adds clock mode">
+      <button id="fwUpload">Upload release</button>
+      <div class="err" id="fwErr"></div>
+      <div id="releases"></div>
+    </div>
+
+    <button class="link" id="signOut">Sign out</button>
+  </section>
+</main>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const sb = createClient('https://vvnrjlsqtfieftvjenhf.supabase.co',
+                        'sb_publishable_bkutITeoaX9-TnZGXf9Uuw_f1Xgtu5C');
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MOODS = [['', 'No reaction'], ['hearts', 'Hearts'], ['wink', 'Wink'], ['surprise', 'Surprise'],
+               ['look', 'Look around'], ['squint', 'Squint'], ['angry', 'Angry']];
+
+let me = null, profile = null, signUpMode = false, refreshTimer = null;
+
+// ---------- auth ----------
+$('authSwitch').onclick = () => {
+  signUpMode = !signUpMode;
+  $('authTitle').textContent = signUpMode ? 'Create account' : 'Sign in';
+  $('authBtn').textContent = signUpMode ? 'Create account' : 'Sign in';
+  $('authSwitch').textContent = signUpMode ? 'Have an account? Sign in' : 'New here? Create an account';
+  $('displayName').classList.toggle('hidden', !signUpMode);
+  $('authErr').textContent = '';
+};
+
+$('authBtn').onclick = async () => {
+  const email = $('email').value.trim(), password = $('password').value;
+  $('authErr').textContent = '';
+  $('authBtn').disabled = true;
+  const res = signUpMode
+    ? await sb.auth.signUp({ email, password, options: { data: { display_name: $('displayName').value.trim() || undefined } } })
+    : await sb.auth.signInWithPassword({ email, password });
+  $('authBtn').disabled = false;
+  if (res.error) { $('authErr').textContent = res.error.message; return; }
+  if (signUpMode && !res.data.session) $('authErr').textContent = 'Check your email to confirm, then sign in.';
+};
+
+$('signOut').onclick = () => sb.auth.signOut();
+
+sb.auth.onAuthStateChange((_e, session) => {
+  me = session?.user ?? null;
+  $('authView').classList.toggle('hidden', !!me);
+  $('appView').classList.toggle('hidden', !me);
+  clearInterval(refreshTimer);
+  if (me) { start(); refreshTimer = setInterval(loadDevices, 15000); }
+  else $('who').textContent = '';
+});
+
+async function start() {
+  const { data } = await sb.from('profiles').select('*').eq('id', me.id).single();
+  profile = data;
+  $('who').textContent = profile?.display_name ?? me.email;
+  $('adminCard').classList.toggle('hidden', !profile?.is_admin);
+  loadDevices();
+  if (profile?.is_admin) loadReleases();
+}
+
+// ---------- displays ----------
+async function loadDevices() {
+  const { data: devices, error } = await sb.from('devices')
+    .select('id,name,fw_version,fw_channel,last_seen,settings,claimed_by').order('created_at');
+  if (error) return;
+  const box = $('devices');
+  if (!devices.length) { box.innerHTML = '<p class="meta empty">No displays yet. Add one below.</p>'; return; }
+
+  // keep anything being typed: only rebuild cards that don't exist yet, refresh the rest
+  for (const d of devices) {
+    let card = document.querySelector(`[data-dev="${d.id}"]`);
+    if (!card) { card = buildCard(d); box.appendChild(card); }
+    updateCard(card, d);
+  }
+  document.querySelectorAll('[data-dev]').forEach(c => {
+    if (!devices.find(d => d.id === c.dataset.dev)) c.remove();
+  });
+  box.querySelectorAll('.meta.empty').forEach(e => e.remove());
+}
+
+function buildCard(d) {
+  const owner = d.claimed_by === me.id || profile?.is_admin;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.dev = d.id;
+  card.innerHTML = `
+    <div class="head"><span class="dot"></span><h2 class="name"></h2></div>
+    <div class="meta status"></div>
+    <textarea class="text" rows="2" maxlength="140" placeholder="Type a message..."></textarea>
+    <div class="row">
+      <select class="mood">${MOODS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      <select class="reps">${[1,2,3,4,5].map(n => `<option ${n===3?'selected':''} value="${n}">Show ${n}x</option>`).join('')}</select>
+    </div>
+    <details class="sched"><summary>Schedule for later</summary><input class="when" type="datetime-local"></details>
+    <button class="send">Send</button>
+    <div class="ok-text result"></div>
+    <h3>Recent</h3><div class="history"></div>
+    ${owner ? `
+    <details><summary>Settings</summary>
+      <label>Name</label><input class="rename">
+      <label>Brightness</label><input class="bright" type="range" min="0" max="15">
+      <label>Eyes run for (seconds) before the clock and message replay</label>
+      <input class="eyesSec" type="number" min="10" max="600" step="5">
+      <div class="row">
+        <select class="clockOn"><option value="1">Clock on</option><option value="0">Clock off</option></select>
+        <select class="clock24"><option value="0">12-hour</option><option value="1">24-hour</option></select>
+      </div>
+      <label>Time zone</label>
+      <select class="tz">
+        <option value="EST5EDT,M3.2.0,M11.1.0">Eastern</option>
+        <option value="CST6CDT,M3.2.0,M11.1.0">Central</option>
+        <option value="MST7MDT,M3.2.0,M11.1.0">Mountain</option>
+        <option value="MST7">Arizona (no DST)</option>
+        <option value="PST8PDT,M3.2.0,M11.1.0">Pacific</option>
+        <option value="AKST9AKDT,M3.2.0,M11.1.0">Alaska</option>
+        <option value="HST10">Hawaii</option>
+      </select>
+      <label>Replay messages from the last</label>
+      <select class="replay">
+        <option value="0">Don't replay</option><option value="1">1 hour</option><option value="3">3 hours</option>
+        <option value="6">6 hours</option><option value="12">12 hours</option><option value="24">24 hours</option>
+      </select>
+      <label>Firmware updates</label>
+      <select class="channel"><option value="stable">Stable releases only</option><option value="test">Test releases (try new firmware first)</option></select>
+      <button class="ghost save">Save settings</button>
+      <button class="link remove">Remove this display</button>
+    </details>` : ''}`;
+
+  const q = s => card.querySelector(s);
+  q('.send').onclick = async () => {
+    const text = q('.text').value.trim(), mood = q('.mood').value;
+    if (!text && !mood) { q('.result').textContent = 'Type a message or pick a reaction'; return; }
+    const row = { device_id: d.id, sender_id: me.id, text: text || null, mood: mood || null,
+                  repeats: +q('.reps').value, kind: text ? 'message' : 'mood' };
+    if (q('.sched').open && q('.when').value) row.deliver_at = new Date(q('.when').value).toISOString();
+    q('.send').disabled = true;
+    const { error } = await sb.from('messages').insert(row);
+    q('.send').disabled = false;
+    q('.result').textContent = error ? error.message : (row.deliver_at ? 'Scheduled!' : 'Sent! It will show within ~15 seconds.');
+    if (!error) { q('.text').value = ''; loadHistory(card, d.id); }
+  };
+
+  if (owner) {
+    q('.rename').value = d.name;
+    const s = d.settings || {};
+    q('.bright').value  = s.brightness ?? 3;
+    q('.eyesSec').value = s.eyes_seconds ?? 45;
+    q('.clockOn').value = (s.clock ?? true) ? '1' : '0';
+    q('.clock24').value = s.clock24 ? '1' : '0';
+    q('.tz').value      = s.tz ?? 'CST6CDT,M3.2.0,M11.1.0';
+    q('.replay').value  = String(s.replay_hours ?? 6);
+    q('.channel').value = d.fw_channel;
+    q('.save').onclick = async () => {
+      const settings = { ...(d.settings || {}),
+        brightness:   +q('.bright').value,
+        eyes_seconds: Math.min(600, Math.max(10, +q('.eyesSec').value || 45)),
+        clock:        q('.clockOn').value === '1',
+        clock24:      q('.clock24').value === '1',
+        tz:           q('.tz').value,
+        replay_hours: +q('.replay').value };
+      const { error } = await sb.from('devices')
+        .update({ name: q('.rename').value.trim() || d.name, settings, fw_channel: q('.channel').value })
+        .eq('id', d.id);
+      q('.result').textContent = error ? error.message : 'Settings saved';
+      loadDevices();
+    };
+    q('.remove').onclick = async () => {
+      if (!confirm(`Remove ${d.name}? It will show a new code to be added again.`)) return;
+      await sb.from('devices').delete().eq('id', d.id);
+      loadDevices();
+    };
+  }
+  loadHistory(card, d.id);
+  return card;
+}
+
+function updateCard(card, d) {
+  const online = d.last_seen && (Date.now() - new Date(d.last_seen)) < 60000;
+  card.querySelector('.name').textContent = d.name;
+  card.querySelector('.dot').classList.toggle('on', !!online);
+  card.querySelector('.status').textContent =
+    (online ? 'Online' : d.last_seen ? 'Last seen ' + new Date(d.last_seen).toLocaleString() : 'Never connected')
+    + (d.fw_version ? ` · firmware ${d.fw_version}` : '');
+  loadHistory(card, d.id);
+}
+
+async function loadHistory(card, deviceId) {
+  const { data } = await sb.from('messages')
+    .select('id,text,mood,deliver_at,delivered_at,sender_id,profiles(display_name)')
+    .eq('device_id', deviceId).order('created_at', { ascending: false }).limit(8);
+  card.querySelector('.history').innerHTML = (data || []).map(m => {
+    const pending = !m.delivered_at;
+    const when = new Date(m.delivered_at || m.deliver_at).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+    return `<div class="msg"><span class="t">${esc(m.text || '(' + m.mood + ')')}${m.text && m.mood ? ' · ' + esc(m.mood) : ''}
+      <br><span class="meta">${esc(m.profiles?.display_name || '')} · ${when}</span></span>
+      <span class="pill ${pending ? '' : 'ok'}">${pending ? (new Date(m.deliver_at) > new Date() ? 'scheduled' : 'waiting') : 'shown'}</span></div>`;
+  }).join('') || '<p class="meta">Nothing sent yet.</p>';
+}
+
+$('claimBtn').onclick = async () => {
+  $('claimErr').textContent = '';
+  const { error } = await sb.rpc('claim_device', { p_code: $('claimCode').value, p_name: $('claimName').value });
+  if (error) { $('claimErr').textContent = error.message; return; }
+  $('claimCode').value = $('claimName').value = '';
+  loadDevices();
+};
+
+// ---------- firmware (admin) ----------
+async function sha256Hex(buf) {
+  const d = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+$('fwUpload').onclick = async () => {
+  const file = $('fwFile').files[0], version = $('fwVersion').value.trim();
+  $('fwErr').textContent = '';
+  if (!file || !version) { $('fwErr').textContent = 'Pick a .bin file and enter its version'; return; }
+  $('fwUpload').disabled = true;
+  try {
+    const buf = await file.arrayBuffer();
+    const sha = await sha256Hex(buf);
+    const path = `releases/${version}.bin`;
+    let r = await sb.storage.from('firmware').upload(path, file, { upsert: true, contentType: 'application/octet-stream' });
+    if (r.error) throw r.error;
+    r = await sb.from('firmware_releases').insert({ version, channel: $('fwChannel').value, notes: $('fwNotes').value.trim() || null,
+                                                   storage_path: path, sha256: sha, size_bytes: buf.byteLength });
+    if (r.error) throw r.error;
+    $('fwFile').value = ''; $('fwVersion').value = ''; $('fwNotes').value = '';
+    loadReleases();
+  } catch (e) { $('fwErr').textContent = e.message; }
+  $('fwUpload').disabled = false;
+};
+
+async function loadReleases() {
+  const { data } = await sb.from('firmware_releases').select('*').order('created_at', { ascending: false }).limit(10);
+  $('releases').innerHTML = (data || []).map(r => `
+    <div class="msg"><span class="t"><b>${esc(r.version)}</b> · ${r.channel === 'test' ? 'test' : 'everyone'}
+      ${r.notes ? '<br><span class="meta">' + esc(r.notes) + '</span>' : ''}
+      <br><span class="meta">${Math.round(r.size_bytes / 1024)} KB · ${new Date(r.created_at).toLocaleDateString()}</span></span>
+      <span>${r.published
+        ? `<span class="pill ok">published</span><br><button class="link" data-unpub="${r.id}">unpublish</button>`
+        : `<button class="ghost" style="width:auto" data-pub="${r.id}">Publish</button>`}</span></div>`).join('');
+  $('releases').querySelectorAll('[data-pub],[data-unpub]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.pub || b.dataset.unpub;
+    if (b.dataset.pub && !confirm('Publish? Matching displays will install it within a minute.')) return;
+    await sb.from('firmware_releases').update({ published: !!b.dataset.pub }).eq('id', id);
+    loadReleases();
+  });
+}
+</script>
+</body>
+</html>

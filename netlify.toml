@@ -1,0 +1,4 @@
+# The web app is a single static page: no build step, just publish app/
+[build]
+  publish = "app"
+  command = ""

@@ -1,0 +1,91 @@
+# Builds the alien firmware and uploads it to Supabase as an unpublished TEST release.
+# Trigger: push a tag like v2.2.0 (must match FW_VERSION in alien_v2.ino),
+# or run it by hand from the Actions tab (build only, no upload).
+# Publish it afterwards from the web app's Firmware releases section.
+#
+# Repo secrets needed (Settings > Secrets and variables > Actions):
+#   SUPABASE_URL          https://vvnrjlsqtfieftvjenhf.supabase.co
+#   SUPABASE_SECRET_KEY   the project's secret key (sb_secret_...), never the publishable one
+#   OTA_PASSWORD          password for Arduino IDE uploads over Wi-Fi
+
+name: Firmware
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      SKETCH: firmware/alien_v2
+      FQBN: esp32:esp32:esp32c3:CDCOnBoot=cdc,PartitionScheme=min_spiffs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read FW_VERSION
+        id: ver
+        run: |
+          v=$(grep -oP '#define FW_VERSION "\K[^"]+' $SKETCH/alien_v2.ino)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Firmware version $v"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$v" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match FW_VERSION $v"; exit 1
+          fi
+
+      - name: Write secrets.h
+        env:
+          OTA_PASSWORD: ${{ secrets.OTA_PASSWORD }}
+        run: |
+          pw="${OTA_PASSWORD:-changeme}"
+          printf '#define OTA_PASSWORD_VALUE "%s"\n' "$pw" > $SKETCH/secrets.h
+
+      - name: Install Arduino CLI, ESP32 core and libraries
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "MD_Parola" "MD_MAX72XX" "WiFiManager" "ArduinoJson"
+
+      - name: Compile
+        run: arduino-cli compile --fqbn "$FQBN" --output-dir build $SKETCH
+
+      - name: Keep the binary as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alien_v2-${{ steps.ver.outputs.version }}
+          path: build/alien_v2.ino.bin
+
+      - name: Upload to Supabase as a test release (unpublished)
+        if: github.ref_type == 'tag'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -e
+          BIN=build/alien_v2.ino.bin
+          SHA=$(sha256sum $BIN | cut -d' ' -f1)
+          SIZE=$(stat -c%s $BIN)
+          PATH_IN_BUCKET="releases/$VERSION.bin"
+          NOTES=$(git log -1 --pretty=%s)
+
+          curl -fsS -X POST "$SUPABASE_URL/storage/v1/object/firmware/$PATH_IN_BUCKET" \
+            -H "apikey: $SUPABASE_SECRET_KEY" \
+            -H "x-upsert: true" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @$BIN
+
+          jq -n --arg v "$VERSION" --arg p "$PATH_IN_BUCKET" --arg s "$SHA" --argjson z "$SIZE" --arg n "$NOTES" \
+            '{version:$v, channel:"test", storage_path:$p, sha256:$s, size_bytes:$z, notes:$n, published:false}' > release.json
+
+          curl -fsS -X POST "$SUPABASE_URL/rest/v1/firmware_releases?on_conflict=version" \
+            -H "apikey: $SUPABASE_SECRET_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            --data @release.json
+
+          echo "Uploaded $VERSION ($SIZE bytes, sha256 $SHA). Publish it from the web app."
