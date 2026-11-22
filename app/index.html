@@ -205,6 +205,8 @@ function buildCard(d) {
       <label>Firmware updates</label>
       <select class="channel"><option value="stable">Stable releases only</option><option value="test">Test releases (try new firmware first)</option></select>
       <button class="ghost save">Save settings</button>
+      <label>Who can send messages</label>
+      <div class="access meta">Loading...</div>
       <button class="link remove">Remove this display</button>
     </details>` : ''}`;
 
@@ -246,6 +248,7 @@ function buildCard(d) {
       q('.result').textContent = error ? error.message : 'Settings saved';
       loadDevices();
     };
+    loadAccess(card, d);
     q('.remove').onclick = async () => {
       if (!confirm(`Remove ${d.name}? It will show a new code to be added again.`)) return;
       await sb.from('devices').delete().eq('id', d.id);
@@ -254,6 +257,31 @@ function buildCard(d) {
   }
   loadHistory(card, d.id);
   return card;
+}
+
+// family members with a tick box each: ticked = can send to this display
+async function loadAccess(card, d) {
+  const box = card.querySelector('.access');
+  const [{ data: people }, { data: access }] = await Promise.all([
+    sb.from('profiles').select('id,display_name').order('display_name'),
+    sb.from('device_access').select('user_id').eq('device_id', d.id)
+  ]);
+  const allowed = new Set((access || []).map(a => a.user_id));
+  box.innerHTML = (people || []).map(p => {
+    const isOwner = p.id === d.claimed_by;
+    return `<label style="display:flex;align-items:center;gap:8px;margin:6px 0;font-size:15px;color:var(--text)">
+      <input type="checkbox" style="width:auto;margin:0" data-user="${p.id}"
+        ${allowed.has(p.id) || isOwner ? 'checked' : ''} ${isOwner ? 'disabled' : ''}>
+      ${esc(p.display_name)}${isOwner ? ' <span class="meta">(owner)</span>' : ''}</label>`;
+  }).join('') + '<p class="meta">Others appear here after they create an account in this app.</p>';
+
+  box.querySelectorAll('input[data-user]:not([disabled])').forEach(cb => cb.onchange = async () => {
+    const row = { device_id: d.id, user_id: cb.dataset.user };
+    const { error } = cb.checked
+      ? await sb.from('device_access').insert(row)
+      : await sb.from('device_access').delete().match(row);
+    if (error) { cb.checked = !cb.checked; alert(error.message); }
+  });
 }
 
 function updateCard(card, d) {
