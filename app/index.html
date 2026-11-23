@@ -34,6 +34,8 @@
   .ok-text { color:var(--green); font-size:14px; min-height:1.2em; }
   details summary { cursor:pointer; color:var(--muted); font-size:14px; margin-top:8px; }
   .hidden { display:none !important; }
+  .emojis { display:flex; flex-wrap:wrap; gap:4px; margin:2px 0 4px; }
+  .emojis .emo { width:auto; flex:0 0 auto; background:#222; border:1px solid var(--line); padding:5px 7px; margin:0; font-size:19px; line-height:1; }
   label { font-size:13px; color:var(--muted); }
 </style>
 </head>
@@ -93,6 +95,8 @@ const sb = createClient('https://vvnrjlsqtfieftvjenhf.supabase.co',
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// emoji the display can draw (see tools/emoji.py); many look-alikes map to these too
+const EMOJI = ['❤️','😀','😂','😢','😉','👽','⭐','👍','🎂','🎄','🌙','☀️','🐱','🐶','🎵','🎁','✅'];
 const MOODS = [['', 'No reaction'], ['hearts', 'Hearts'], ['wink', 'Wink'], ['surprise', 'Surprise'],
                ['look', 'Look around'], ['squint', 'Squint'], ['angry', 'Angry']];
 
@@ -169,6 +173,7 @@ function buildCard(d) {
     <div class="head"><span class="dot"></span><h2 class="name"></h2></div>
     <div class="meta status"></div>
     <textarea class="text" rows="2" maxlength="140" placeholder="Type a message..."></textarea>
+    <div class="emojis">${EMOJI.map(e => `<button type="button" class="emo">${e}</button>`).join('')}</div>
     <div class="row">
       <select class="mood">${MOODS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
       <select class="reps">${[1,2,3,4,5].map(n => `<option ${n===3?'selected':''} value="${n}">Show ${n}x</option>`).join('')}</select>
@@ -211,6 +216,11 @@ function buildCard(d) {
     </details>` : ''}`;
 
   const q = s => card.querySelector(s);
+  card.querySelectorAll('.emo').forEach(b => b.onclick = () => {
+    const t = q('.text');
+    t.setRangeText(b.textContent, t.selectionStart, t.selectionEnd, 'end');
+    t.focus();
+  });
   q('.send').onclick = async () => {
     const text = q('.text').value.trim(), mood = q('.mood').value;
     if (!text && !mood) { q('.result').textContent = 'Type a message or pick a reaction'; return; }

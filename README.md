@@ -13,6 +13,7 @@ a clock, and messages sent from the family web app, from anywhere.
 | `supabase/migrations/` | Database schema, in the order applied to the live project |
 | `hardware/` | Notes on the printed parts |
 | `.github/workflows/` | Builds firmware and uploads it as a test release |
+| `tools/emoji.py` | Pixel emoji designs; run it to regenerate `firmware/alien_v2/emoji_glyphs.h` |
 
 ## Hardware
 

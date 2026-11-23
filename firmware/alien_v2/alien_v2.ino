@@ -21,6 +21,14 @@
 #include <MD_MAX72xx.h>
 enum Mode { NORMAL, ANGRY, HEARTS };
 
+#include "emoji_glyphs.h"   // pixel emoji, drawn as extra characters 0x80 and up
+
+// glyph code for an emoji code point (0 = not supported)
+uint8_t emojiFor(uint32_t cp) {
+  for (const EmojiMap &e : EMOJI_MAP) if (e.cp == cp) return e.code;
+  return 0;
+}
+
 // ---------- small built-in SHA-256 (verifies downloaded firmware) ----------
 struct Sha256 {
   uint32_t h[8]; uint8_t buf[64]; uint32_t len = 0; uint64_t bits = 0;
@@ -71,7 +79,7 @@ struct Sha256 {
 };
 
 // ---------- build settings ----------
-#define FW_VERSION "2.1.0"
+#define FW_VERSION "2.2.0"
 
 const char *SUPABASE_URL = "https://vvnrjlsqtfieftvjenhf.supabase.co";
 const char *SUPABASE_KEY = "sb_publishable_bkutITeoaX9-TnZGXf9Uuw_f1Xgtu5C";  // public by design
@@ -331,12 +339,31 @@ void runCycle() {
   if (showed) { pupilX = pupilY = 0; wakeUp(); }
 }
 
+// Turns incoming UTF-8 text into what the display can draw: plain ASCII, phone-style
+// curly quotes straightened, and supported emoji swapped for their pixel glyphs.
 String clean(const String &s) {
   String out;
-  for (unsigned int i = 0; i < s.length() && out.length() < 140; i++) {
-    char ch = s[i];
-    if (ch >= 32 && ch <= 126) out += ch;
-    else if (ch == '\n') out += ' ';
+  size_t i = 0, n = s.length();
+  while (i < n && out.length() < 140) {
+    uint8_t b = s[i];
+    uint32_t cp; int len;
+    if      (b < 0x80)           { cp = b;        len = 1; }
+    else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; len = 2; }
+    else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; len = 3; }
+    else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; len = 4; }
+    else { i++; continue; }
+    if (i + len > n) break;
+    for (int k = 1; k < len; k++) cp = (cp << 6) | (s[i + k] & 0x3F);
+    i += len;
+
+    if (cp == '\n' || cp == '\r')           out += ' ';
+    else if (cp >= 32 && cp <= 126)         out += (char)cp;
+    else if (cp == 0x2018 || cp == 0x2019)  out += '\'';
+    else if (cp == 0x201C || cp == 0x201D)  out += '"';
+    else if (cp == 0x2013 || cp == 0x2014)  out += '-';
+    else if (cp == 0x2026)                  out += "...";
+    else if (uint8_t g = emojiFor(cp))      out += (char)g;
+    // anything else (skin tones, joiners, unsupported emoji) is skipped
   }
   out.trim();
   return out;
@@ -535,6 +562,7 @@ void setup() {
   display.begin();
   mx = display.getGraphicObject();
   display.setIntensity(brightness);
+  for (EmojiGlyph &g : EMOJI_GLYPHS) display.addChar(g.code, g.data);
   randomSeed(esp_random());
 
   char id[13];
