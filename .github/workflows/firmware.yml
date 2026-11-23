@@ -27,7 +27,7 @@ jobs:
       SKETCH: firmware/alien_v2
       FQBN: esp32:esp32:esp32c3:CDCOnBoot=cdc,PartitionScheme=min_spiffs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Read FW_VERSION
         id: ver
@@ -59,7 +59,7 @@ jobs:
         run: arduino-cli compile --fqbn "$FQBN" --output-dir build $SKETCH
 
       - name: Keep the binary as a build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: alien_v2-${{ steps.ver.outputs.version }}
           path: build/alien_v2.ino.bin

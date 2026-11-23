@@ -20,6 +20,7 @@
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 enum Mode { NORMAL, ANGRY, HEARTS };
+struct Msg { String text; String mood; uint8_t repeats; };   // up here: used in function signatures
 
 #include "emoji_glyphs.h"   // pixel emoji, drawn as extra characters 0x80 and up
 
@@ -119,7 +120,6 @@ bool online = false, claimed = false;
 uint8_t brightness = 3;
 unsigned long nextPoll = 0;
 
-struct Msg { String text; String mood; uint8_t repeats; };
 const int QMAX = 6;
 Msg queue[QMAX];
 int qHead = 0, qCount = 0;
